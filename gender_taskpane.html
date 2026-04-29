@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tamer Gender Predictor</title>
+    
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --tamer-red: #d24948;
+            --tamer-red-hover: #b03a39;
+            --bg-gray: #f3f2f1;
+            --text-dark: #323130;
+            --card-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; background-color: var(--bg-gray); color: var(--text-dark); }
+        .header { background-color: #fff; padding: 20px; text-align: center; border-bottom: 3px solid var(--tamer-red); box-shadow: var(--card-shadow); }
+        .logo-container img { max-height: 50px; }
+        h1 { font-size: 18px; margin: 0; color: var(--tamer-red); font-weight: 600; }
+        .subtitle { font-size: 12px; color: #666; margin-top: 5px; }
+        .controls { padding: 20px; background: #fff; margin: 10px; border-radius: 4px; box-shadow: var(--card-shadow); }
+        
+        .btn-primary { width: 100%; padding: 12px; background-color: var(--tamer-red); color: white; border: none; border-radius: 4px; font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.2s; margin-bottom: 10px;}
+        .btn-primary:hover { background-color: var(--tamer-red-hover); }
+        .btn-primary:disabled { background-color: #ccc; cursor: not-allowed; }
+        
+        .helper-text { font-size: 12px; color: #666; margin-bottom: 15px; text-align: center; }
+        .input-group { display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px; }
+        .input-group input { width: 50px; padding: 8px; text-align: center; border: 1px solid #ccc; border-radius: 4px; text-transform: uppercase; }
+        
+        #write-section { display: none; border-top: 1px solid #eee; padding-top: 15px; margin-top: 10px; }
+        #status-area { text-align: center; font-size: 13px; font-weight: bold; margin-bottom: 10px; color: #333; }
+        
+        .spinner { border: 4px solid #f3f3f3; border-top: 4px solid var(--tamer-red); border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 10px auto; display: none; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="logo-container">
+            <img src="logo.png" alt="Tamer Logo" onerror="this.style.display='none'"> 
+        </div>
+        <h1>Gender Predictor</h1>
+        <div class="subtitle">AI-Powered Arabic Name Classification</div>
+    </div>
+
+    <div class="controls">
+        <div class="helper-text">Select a column of names in Excel, then click Predict.</div>
+        <button id="runBtn" class="btn-primary" onclick="fetchPredictions()">1. Predict Gender</button>
+        <div id="loader" class="spinner"></div>
+        <div id="status-area"></div>
+
+        <!-- Hidden until AI processing is complete -->
+        <div id="write-section">
+            <div class="helper-text">Predictions ready. Enter destination column letter (e.g., C):</div>
+            <div class="input-group">
+                <label for="colInput">Target Column:</label>
+                <input type="text" id="colInput" placeholder="C" maxlength="2">
+            </div>
+            <button id="writeBtn" class="btn-primary" onclick="writeToExcel()">2. Write to Excel</button>
+        </div>
+    </div>
+
+    <script>
+        let globalResults =[]; // Store AI results temporarily
+
+        Office.onReady((info) => {
+            if (info.host === Office.HostType.Excel) {
+                console.log("Excel Ready - Gender Module");
+            }
+        });
+
+        async function fetchPredictions() {
+            const btn = document.getElementById("runBtn");
+            const loader = document.getElementById("loader");
+            const statusArea = document.getElementById("status-area");
+            const writeSection = document.getElementById("write-section");
+            
+            btn.disabled = true;
+            btn.innerText = "Processing LLM...";
+            loader.style.display = "block";
+            statusArea.innerText = "";
+            writeSection.style.display = "none";
+            globalResults = [];
+
+            try {
+                let dataToSend =[];
+
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getActiveWorksheet();
+                    let range = context.workbook.getSelectedRange();
+                    
+                    const usedRange = sheet.getUsedRange();
+                    const intersection = range.getIntersection(usedRange);
+                    
+                    intersection.load("values, rowIndex, rowCount");
+                    await context.sync();
+
+                    if (!intersection || intersection.isNullObject || !intersection.values) {
+                        throw new Error("Selection is empty or outside data range.");
+                    }
+
+                    for (let i = 0; i < intersection.rowCount; i++) {
+                        let cellValue = intersection.values[i][0]; 
+                        let realRowIndex = intersection.rowIndex + i + 1; // 1-based index for Excel
+
+                        if (cellValue && cellValue.toString().trim() !== "") {
+                            dataToSend.push([realRowIndex, cellValue.toString().trim()]);
+                        }
+                    }
+                });
+
+                if (dataToSend.length === 0) throw new Error("No text found in selection.");
+
+                // Call the new modular backend
+                const response = await fetch('http://localhost:5000/predict_gender', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ data: dataToSend })
+                });
+
+                if (!response.ok) throw new Error("Backend connection failed.");
+                
+                const responseData = await response.json();
+                if (responseData.error) throw new Error(responseData.error);
+
+                globalResults = responseData.results;
+                
+                // Update UI to proceed to step 2
+                statusArea.style.color = "green";
+                statusArea.innerText = `Success: Processed ${globalResults.length} names.`;
+                writeSection.style.display = "block";
+
+            } catch (error) {
+                console.error(error);
+                statusArea.style.color = "red";
+                statusArea.innerText = error.message;
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "1. Predict Gender";
+                loader.style.display = "none";
+            }
+        }
+
+        async function writeToExcel() {
+            const colInput = document.getElementById("colInput").value.trim().toUpperCase();
+            const statusArea = document.getElementById("status-area");
+            const writeBtn = document.getElementById("writeBtn");
+
+            // Basic regex to validate Excel column letters (A-Z, AA-ZZ)
+            if (!/^[A-Z]{1,3}$/.test(colInput)) {
+                statusArea.style.color = "red";
+                statusArea.innerText = "Invalid column letter.";
+                return;
+            }
+
+            writeBtn.disabled = true;
+            writeBtn.innerText = "Writing...";
+
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getActiveWorksheet();
+                    
+                    // Queue up cell writes based on exact row indexes returned from backend
+                    globalResults.forEach(res => {
+                        let targetCell = sheet.getRange(`${colInput}${res.row_index}`);
+                        targetCell.values = [[res.gender]];
+                    });
+
+                    // Execute all queued writes in a single batch transaction (Highly optimized)
+                    await context.sync();
+                });
+
+                statusArea.style.color = "green";
+                statusArea.innerText = "Data written successfully!";
+                
+            } catch (error) {
+                console.error(error);
+                statusArea.style.color = "red";
+                statusArea.innerText = "Error writing to Excel. Is the sheet protected?";
+            } finally {
+                writeBtn.disabled = false;
+                writeBtn.innerText = "2. Write to Excel";
+            }
+        }
+    </script>
+</body>
+</html>

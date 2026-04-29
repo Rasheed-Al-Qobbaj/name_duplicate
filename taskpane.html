@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tamer Data Cleaner</title>
+    
+    <!-- Office JS -->
+    <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+    
+    <!-- Google Fonts for a clean look -->
+    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --tamer-red: #d24948;
+            --tamer-red-hover: #b03a39;
+            --bg-gray: #f3f2f1;
+            --text-dark: #323130;
+            --card-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        body {
+            font-family: 'Segoe UI', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-gray);
+            color: var(--text-dark);
+        }
+
+        /* --- Header Section --- */
+        .header {
+            background-color: #fff;
+            padding: 20px;
+            text-align: center;
+            border-bottom: 3px solid var(--tamer-red);
+            box-shadow: var(--card-shadow);
+        }
+
+        .logo-container {
+            margin-bottom: 10px;
+        }
+
+        .logo-container img {
+            max-height: 50px; /* Adjust based on your actual logo file */
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0;
+            color: var(--tamer-red);
+            font-weight: 600;
+        }
+
+        .subtitle {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        /* --- Controls Section --- */
+        .controls {
+            padding: 20px;
+            background: #fff;
+            margin: 10px;
+            border-radius: 4px;
+            box-shadow: var(--card-shadow);
+        }
+
+        .btn-primary {
+            width: 100%;
+            padding: 12px;
+            background-color: var(--tamer-red);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .btn-primary:hover {
+            background-color: var(--tamer-red-hover);
+        }
+
+        .btn-primary:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+
+        .helper-text {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        /* --- Results Section --- */
+        #results-area {
+            padding: 10px;
+        }
+
+        .group-card {
+            background: white;
+            border-left: 5px solid var(--tamer-red);
+            margin-bottom: 15px;
+            padding: 15px;
+            border-radius: 4px;
+            box-shadow: var(--card-shadow);
+        }
+
+        .group-header {
+            font-size: 13px;
+            font-weight: bold;
+            color: #666;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .duplicate-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .duplicate-row:last-child {
+            border-bottom: none;
+        }
+
+        .name-text {
+            font-size: 14px;
+            /* Force RTL for Arabic names if needed, though usually automatic */
+            direction: rtl; 
+            text-align: right;
+            flex-grow: 1;
+            margin-right: 10px;
+        }
+
+        .row-badge {
+            font-size: 10px;
+            background: #eee;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #666;
+            margin-left: 8px;
+        }
+
+        .action-icon {
+            cursor: pointer;
+            color: var(--tamer-red);
+            padding: 5px;
+            font-size: 16px;
+        }
+        
+        .action-icon:hover {
+            background-color: #fce8e8; /* Light red bg on hover */
+            border-radius: 50%;
+        }
+
+        /* --- Spinner --- */
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--tamer-red);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+            display: none; /* Hidden by default */
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="logo-container">
+            <!-- Ensure logo.png is in the same folder -->
+            <img src="logo.png" alt="Tamer Logo" onerror="this.style.display='none'"> 
+        </div>
+        <h1>Data Dedup Utility</h1>
+        <div class="subtitle">AI-Powered Arabic Name Matching</div>
+    </div>
+
+    <div class="controls">
+        <div class="helper-text">Select a column of names in Excel, then click Analyze.</div>
+        <button id="runBtn" class="btn-primary" onclick="runAnalysis()">Analyze Selection</button>
+        <div id="loader" class="spinner"></div>
+    </div>
+
+    <div id="results-area">
+        <!-- Cards will be injected here -->
+    </div>
+
+    <script>
+        Office.onReady((info) => {
+            if (info.host === Office.HostType.Excel) {
+                console.log("Excel Ready");
+            }
+        });
+
+        async function runAnalysis() {
+            const btn = document.getElementById("runBtn");
+            const loader = document.getElementById("loader");
+            const results = document.getElementById("results-area");
+            
+            btn.disabled = true;
+            btn.innerText = "Processing...";
+            loader.style.display = "block";
+            results.innerHTML = "";
+
+            try {
+                await Excel.run(async (context) => {
+                    const sheet = context.workbook.worksheets.getActiveWorksheet();
+                    let range = context.workbook.getSelectedRange();
+                    
+                    // FIX: Intersect selection with the Used Range.
+                    // This prevents crashing if you select an entire column (1M rows).
+                    const usedRange = sheet.getUsedRange();
+                    const intersection = range.getIntersection(usedRange);
+                    
+                    intersection.load("values, rowIndex, rowCount, columnCount");
+                    await context.sync();
+
+                    // Edge case: If selection is outside used data (empty space)
+                    if (!intersection || intersection.isNullObject) {
+                        showError("Please select cells that actually contain data.");
+                        return;
+                    }
+
+                    // 3. Prepare Data
+                    let dataToSend = [];
+                    // Safety check: ensure values exist
+                    if (intersection.values) {
+                        for (let i = 0; i < intersection.rowCount; i++) {
+                            // double check row exists
+                            if (!intersection.values[i]) continue;
+                            
+                            let cellValue = intersection.values[i][0]; 
+                            let realRowIndex = intersection.rowIndex + i + 1;
+
+                            // Only add if text exists
+                            if (cellValue && cellValue.toString().trim() !== "") {
+                                dataToSend.push([realRowIndex, cellValue]);
+                            }
+                        }
+                    }
+
+                    if (dataToSend.length === 0) {
+                        showError("No text found in selection.");
+                        return;
+                    }
+
+                    // 4. Call Backend
+                    const response = await fetch('http://localhost:5000/detect_duplicates', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({ 
+                            data: dataToSend, 
+                            threshold: 0.85 
+                        })
+                    });
+
+                    if (!response.ok) throw new Error("Backend connection failed");
+                    const result = await response.json();
+                    renderResults(result.groups);
+                });
+            } catch (error) {
+                console.error(error);
+                // Clean error message for user
+                let msg = error.message;
+                if (msg.includes("Intersection")) msg = "Selection is empty (outside data range).";
+                showError(msg);
+            } finally {
+                btn.disabled = false;
+                btn.innerText = "Analyze Selection";
+                loader.style.display = "none";
+            }
+        }
+
+        function renderResults(groups) {
+            const container = document.getElementById('results-area');
+            
+            if (groups.length === 0) {
+                container.innerHTML = `<div style="text-align:center; color:#666; padding:20px;">No duplicates found!</div>`;
+                return;
+            }
+
+            groups.forEach((group, idx) => {
+                let cardHtml = `
+                    <div class="group-card">
+                        <div class="group-header">
+                            <span>Potential Match Group #${idx+1}</span>
+                            <span>${group.length} items</span>
+                        </div>`;
+                
+                group.forEach(item => {
+                    cardHtml += `
+                        <div class="duplicate-row">
+                            <span class="row-badge">Row ${item.row_index}</span>
+                            <span class="name-text">${item.name}</span>
+                            <span class="action-icon" title="Highlight in Excel" onclick="highlightRow(${item.row_index})">
+                                👁️
+                            </span>
+                        </div>
+                    `;
+                });
+
+                cardHtml += `</div>`;
+                container.innerHTML += cardHtml;
+            });
+        }
+
+        function showError(msg) {
+            const container = document.getElementById('results-area');
+            container.innerHTML = `<div style="color:red; text-align:center; padding:10px;">${msg}</div>`;
+        }
+
+        async function highlightRow(rowIndex) {
+            await Excel.run(async (context) => {
+                const sheet = context.workbook.worksheets.getActiveWorksheet();
+                // Highlight Columns A to Z for that row
+                const range = sheet.getRange(`A${rowIndex}:Z${rowIndex}`);
+                range.format.fill.color = "#ffcccc"; // Light red highlight
+                await context.sync();
+            });
+        }
+    </script>
+</body>
+</html>
